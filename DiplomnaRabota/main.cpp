@@ -1,10 +1,11 @@
-#include "FileCompressorGUI.h"
 #include <QApplication>
 
-int main(int argc, char* argv[])
-{
-    QApplication a(argc, argv);
-    FileCompressorGUI w;
-    w.show();
-    return a.exec();
+#include "FileCompressorGUI.h"
+
+
+int main(int argc, char* argv[]) {
+    QApplication app(argc, argv);
+    FileCompressorGUI window;
+    window.show();
+    return app.exec();
 }

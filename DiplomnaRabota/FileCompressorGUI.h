@@ -1,15 +1,14 @@
+#pragma once
 #ifndef FILECOMPRESSORGUI_H
 #define FILECOMPRESSORGUI_H
 
 #include <QMainWindow>
-#include <QFileDialog>
-#include <QMessageBox>
 
-#include "ui_FileCompressorGUI.h"
-
-QT_BEGIN_NAMESPACE
-namespace Ui { class FileCompressorGUIClass; }
-QT_END_NAMESPACE
+class QListWidget;
+class QLineEdit;
+class QPushButton;
+class QProgressBar;
+class QLabel;
 
 class FileCompressorGUI : public QMainWindow
 {
@@ -17,15 +16,24 @@ class FileCompressorGUI : public QMainWindow
 
 public:
     explicit FileCompressorGUI(QWidget* parent = nullptr);
-    ~FileCompressorGUI();
 
 private slots:
-    void on_selectFileButton_clicked();
-    void on_compressButton_clicked();
+    void addFiles();
+    void removeSelectedFiles();
+    void chooseOutputDirectory();
+    void startCompression();
 
 private:
-    Ui::FileCompressorGUIClass* ui;
-    QString selectedFilePath;
+    QListWidget* fileList;
+    QLineEdit* outputPathEdit;
+    QProgressBar* progressBar;
+    QLabel* statusLabel;
+    QPushButton* addFileBtn;
+    QPushButton* removeFileBtn;
+    QPushButton* browseBtn;
+    QPushButton* startBtn;
+
+    void setupUI();
 };
 
 #endif 
