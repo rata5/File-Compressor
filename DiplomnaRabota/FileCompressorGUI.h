@@ -10,8 +10,7 @@ class QPushButton;
 class QProgressBar;
 class QLabel;
 
-class FileCompressorGUI : public QMainWindow
-{
+class FileCompressorGUI : public QMainWindow {
     Q_OBJECT
 
 public:
@@ -33,7 +32,7 @@ private:
     QPushButton* browseBtn;
     QPushButton* startBtn;
 
-    void setupUI();
+   void setupUI();
 };
 
 #endif 

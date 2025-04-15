@@ -1,4 +1,5 @@
 #include "FileCompressorGUI.h"
+#include "DragAndDropList.h"
 
 #include <QListWidget>
 #include <QPushButton>
@@ -20,7 +21,7 @@ void FileCompressorGUI::setupUI() {
     QWidget* central = new QWidget(this);
     this->setCentralWidget(central);
 
-    fileList = new QListWidget(this);
+    fileList = new DragAndDropList(this);
     addFileBtn = new QPushButton("Add File(s)", this);
     removeFileBtn = new QPushButton("Remove Selected", this);
     browseBtn = new QPushButton("Browse...", this);
