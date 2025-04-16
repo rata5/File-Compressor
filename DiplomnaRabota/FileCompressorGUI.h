@@ -2,6 +2,8 @@
 #ifndef FILECOMPRESSORGUI_H
 #define FILECOMPRESSORGUI_H
 
+#include "DragAndDropList.h"
+
 #include <QMainWindow>
 
 class QListWidget;
@@ -23,7 +25,7 @@ private slots:
     void startCompression();
 
 private:
-    QListWidget* fileList;
+    DragAndDropList* dragAndDropList;
     QLineEdit* outputPathEdit;
     QProgressBar* progressBar;
     QLabel* statusLabel;

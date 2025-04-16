@@ -21,7 +21,7 @@ void FileCompressorGUI::setupUI() {
     QWidget* central = new QWidget(this);
     this->setCentralWidget(central);
 
-    fileList = new DragAndDropList(this);
+    dragAndDropList = new DragAndDropList(this);
     addFileBtn = new QPushButton("Add File(s)", this);
     removeFileBtn = new QPushButton("Remove Selected", this);
     browseBtn = new QPushButton("Browse...", this);
@@ -41,7 +41,7 @@ void FileCompressorGUI::setupUI() {
 
     auto* mainLayout = new QVBoxLayout;
     mainLayout->addWidget(new QLabel("Selected File(s):"));
-    mainLayout->addWidget(fileList);
+    mainLayout->addWidget(dragAndDropList);
     mainLayout->addLayout(fileBtns);
     mainLayout->addWidget(new QLabel("Output Directory:"));
     mainLayout->addLayout(outputDirLayout);
@@ -62,11 +62,11 @@ void FileCompressorGUI::setupUI() {
 
 void FileCompressorGUI::addFiles() {
     QStringList files = QFileDialog::getOpenFileNames(this, "Select Files");
-    fileList->addItems(files);
+    dragAndDropList->addItems(files);
 }
 
 void FileCompressorGUI::removeSelectedFiles() {
-    qDeleteAll(fileList->selectedItems());
+    qDeleteAll(dragAndDropList->selectedItems());
 }
 
 void FileCompressorGUI::chooseOutputDirectory() {
@@ -77,7 +77,7 @@ void FileCompressorGUI::chooseOutputDirectory() {
 }
 
 void FileCompressorGUI::startCompression() {
-    if (fileList->count() == 0 || outputPathEdit->text().isEmpty()) {
+    if (dragAndDropList->count() == 0 || outputPathEdit->text().isEmpty()) {
         QMessageBox::warning(this, "Input Error", "Please select files and output directory.");
         return;
     }

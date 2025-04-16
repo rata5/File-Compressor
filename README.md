@@ -17,3 +17,20 @@ Gzip добавя заглавна и крайна част (~40–60 байта
 Оптимизиране на размера на речника, обработката на блокове и метаданните.
 Възможност за компресиране на множество малки файлове наведнъж.
 Проектиран с малки буфери и линейни времеви ограничения.
+
+istoriq na kompresirane
+
+pri kompresiq - moq format
+
+pri dekompresiq - mainstream formati
+
+parola pri arhiv / razarhiv
+
+drag and drop
+
+thread pri compilirane
+
+
+
+
+
