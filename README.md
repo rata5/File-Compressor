@@ -18,18 +18,15 @@ Gzip добавя заглавна и крайна част (~40–60 байта
 Възможност за компресиране на множество малки файлове наведнъж.
 Проектиран с малки буфери и линейни времеви ограничения.
 
-istoriq na kompresirane
+История на компресиране
 
-pri kompresiq - moq format
+Идея за формат на компресия
 
-pri dekompresiq - mainstream formati
+Да декомпресира WinRAR & 7Zip
 
-parola pri arhiv / razarhiv
+Добавяне на парола
 
-drag and drop
-
-thread pri compilirane
-
+Тредове при компилация
 
 
 

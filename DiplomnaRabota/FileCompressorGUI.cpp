@@ -25,7 +25,10 @@ void FileCompressorGUI::setupUI() {
     addFileBtn = new QPushButton("Add File(s)", this);
     removeFileBtn = new QPushButton("Remove Selected", this);
     browseBtn = new QPushButton("Browse...", this);
+
     startBtn = new QPushButton("Start Compression", this);
+    startBtn->setFixedHeight(40);
+
     outputPathEdit = new QLineEdit(this);
     outputPathEdit->setReadOnly(true);
     progressBar = new QProgressBar(this);
