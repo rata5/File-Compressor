@@ -1,5 +1,6 @@
 #include "FileCompressorGUI.h"
 #include "DragAndDropList.h"
+#include "Compressor.h"
 
 #include <QListWidget>
 #include <QPushButton>
@@ -85,10 +86,36 @@ void FileCompressorGUI::startCompression() {
         return;
     }
 
-    statusLabel->setText("Status: Compressing...");
-    progressBar->setValue(0);
+    QString outputDir = outputPathEdit->text();
+    QDir dir(outputDir);
+    if (!dir.exists()) {
+        QMessageBox::warning(this, "Directory Error", "Output directory does not exist.");
+        return;
+    }
 
-    // Simulated progress
-    progressBar->setValue(100);
+    statusLabel->setText("Status: Compressiong...");
+    progressBar->setValue(0);
+    int fileCount = dragAndDropList->count();
+
+    for (int i = 0; i < fileCount; ++i) {
+        QListWidgetItem* item = dragAndDropList->item(i);
+        QString inputFilePath = item->text();
+        QFileInfo inputInfo(inputFilePath);
+        QString outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".srr");
+
+        qDebug() << "Input file path:" << inputFilePath;
+        qDebug() << "Output file path:" << outputFilePath;
+
+        try {
+            Compressor::compress(inputFilePath.toStdString(), outputFilePath.toStdString());
+        }
+        catch (const std::exception& e) {
+            QMessageBox::critical(this, "Compression Error", QString("Failed to compress %1: %2")
+                .arg(inputFilePath, e.what()));
+            statusLabel->setText("Status Failed!");
+            return;
+        }
+        progressBar->setValue((i + 1) * 100 / fileCount);
+    }
     statusLabel->setText("Status: Done!");
 }

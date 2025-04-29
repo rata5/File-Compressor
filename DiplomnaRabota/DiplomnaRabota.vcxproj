@@ -95,12 +95,18 @@
     <QtRcc Include="FileCompressorGUI.qrc" />
     <QtUic Include="FileCompressorGUI.ui" />
     <QtMoc Include="FileCompressorGUI.h" />
+    <ClCompile Include="ArithmeticCoder.cpp" />
+    <ClCompile Include="Compressor.cpp" />
     <ClCompile Include="DragAndDropList.cpp" />
     <ClCompile Include="FileCompressorGUI.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="DragAndDropList.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ArithmeticCoder.h" />
+    <ClInclude Include="Compressor.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
