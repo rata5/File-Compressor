@@ -103,9 +103,6 @@ void FileCompressorGUI::startCompression() {
         QFileInfo inputInfo(inputFilePath);
         QString outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".srr");
 
-        qDebug() << "Input file path:" << inputFilePath;
-        qDebug() << "Output file path:" << outputFilePath;
-
         try {
             Compressor::compress(inputFilePath.toStdString(), outputFilePath.toStdString());
         }

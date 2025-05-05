@@ -1,94 +1,118 @@
 #include "Compressor.h"
-#include "ArithmeticCoder.h"
 #include <fstream>
 #include <vector>
 #include <cstdint>
+#include <stdexcept>
 
-void Compressor::compress(const std::string& inputFile, const std::string& outputFile) {
-    std::ifstream in(inputFile, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open input file!");
-
-    std::ofstream out(outputFile, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot open output file!");
-
-    ArithmeticCoder coder(&out, nullptr);
-
-    std::vector<uint32_t> freq(257, 1);
-    std::vector<uint32_t> cum_freq(258, 0);
-    uint32_t total = 257;
-
-    auto update_cum_freq = [&]() {
-        cum_freq[0] = 0;
-        for (int i = 0; i < 257; ++i) {
-            cum_freq[i + 1] = cum_freq[i] + freq[i];
+namespace {
+    class Predictor {
+        int cxt = 1;
+        std::vector<int> t;
+    public:
+        Predictor() : t(512, 32768) {}
+        int p() const { return t[cxt] >> 4; }
+        void update(int y) {
+            int& pr = t[cxt];
+            pr += ((y << 16) - pr) >> 5;
+            cxt = (cxt << 1 | y) & 511;
         }
-        };
+    };
 
-    update_cum_freq();
-
-    int ch;
-    while ((ch = in.get()) != EOF) {
-        coder.encode(static_cast<uint16_t>(ch), cum_freq, total);
-
-        ++freq[ch];
-        ++total;
-
-        if (total > 0x00FFFFFF) { // limit frequency growth
-            for (auto& f : freq) {
-                f = (f + 1) / 2;
+    class BitEncoder {
+        uint32_t x1 = 0, x2 = 0xFFFFFFFF;
+        std::ostream& out;
+    public:
+        BitEncoder(std::ostream& o) : out(o) {}
+        void encode(int y, int p) {
+            const uint32_t xmid = x1 + ((x2 - x1) >> 8) * p;
+            y ? x2 = xmid : x1 = xmid + 1;
+            while (((x1 ^ x2) & 0xFF000000) == 0) {
+                out.put(x2 >> 24);
+                x1 <<= 8;
+                x2 = (x2 << 8) + 255;
             }
-            total = 0;
-            for (auto f : freq) {
-                total += f;
-            }
-            update_cum_freq();
         }
-        update_cum_freq();
-    }
+        void flush() {
+            for (int i = 0; i < 4; ++i) out.put(x1 >> 24), x1 <<= 8;
+        }
+    };
 
-    coder.encode(256, cum_freq, total); // special EOF symbol
-    coder.flush();
-    out.flush();
+    class BitDecoder {
+        uint32_t x1 = 0, x2 = 0xFFFFFFFF, x = 0;
+        std::istream& in;
+    public:
+        BitDecoder(std::istream& i) : in(i) {
+            for (int j = 0; j < 4; ++j) x = (x << 8) + (in.get() & 255);
+        }
+        int decode(int p) {
+            const uint32_t xmid = x1 + ((x2 - x1) >> 8) * p;
+            int y = x <= xmid;
+            y ? x2 = xmid : x1 = xmid + 1;
+            while (((x1 ^ x2) & 0xFF000000) == 0) {
+                x1 <<= 8;
+                x2 = (x2 << 8) + 255;
+                x = (x << 8) + (in.get() & 255);
+            }
+            return y;
+        }
+    };
 }
 
-void Compressor::decompress(const std::string& inputFile, const std::string& outputFile) {
-    std::ifstream in(inputFile, std::ios::binary);
-    if (!in) throw std::runtime_error("Cannot open input file!");
+void Compressor::compress(const std::string& inPath, const std::string& outPath) {
+    std::ifstream in(inPath, std::ios::binary);
+    std::ofstream out(outPath, std::ios::binary);
+    if (!in || !out) throw std::runtime_error("Failed to open files for compression");
 
-    std::ofstream out(outputFile, std::ios::binary);
-    if (!out) throw std::runtime_error("Cannot open output file!");
+    // Write header
+    uint32_t magic = 0x53525200; // 'SRR\0'
+    uint32_t version = 1;
+    in.seekg(0, std::ios::end);
+    uint64_t originalSize = in.tellg();
+    in.seekg(0);
 
-    ArithmeticCoder coder(nullptr, &in);
+    out.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    out.write(reinterpret_cast<const char*>(&originalSize), sizeof(originalSize));
 
-    std::vector<uint32_t> freq(257, 1);
-    std::vector<uint32_t> cum_freq(258, 0);
-    uint32_t total = 257;
-
-    auto update_cum_freq = [&]() {
-        cum_freq[0] = 0;
-        for (int i = 0; i < 257; ++i) {
-            cum_freq[i + 1] = cum_freq[i] + freq[i];
+    // Encode file content
+    Predictor predictor;
+    BitEncoder encoder(out);
+    int c;
+    while ((c = in.get()) != EOF) {
+        for (int i = 7; i >= 0; --i) {
+            int bit = (c >> i) & 1;
+            encoder.encode(bit, predictor.p());
+            predictor.update(bit);
         }
-        };
+    }
+    encoder.flush();
+}
 
-    update_cum_freq();
+void Compressor::decompress(const std::string& inPath, const std::string& outPath) {
+    std::ifstream in(inPath, std::ios::binary);
+    std::ofstream out(outPath, std::ios::binary);
+    if (!in || !out) throw std::runtime_error("Failed to open files for decompression");
 
-    while (true) {
-        uint16_t symbol = coder.decode(cum_freq, total);
-        if (symbol == 256) break; // EOF symbol
-        out.put(static_cast<char>(symbol));
+    // Read header
+    uint32_t magic, version;
+    uint64_t originalSize;
+    in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    in.read(reinterpret_cast<char*>(&version), sizeof(version));
+    in.read(reinterpret_cast<char*>(&originalSize), sizeof(originalSize));
 
-        ++freq[symbol];
-        ++total;
-        if (total > 0x00FFFFFF) {
-            for (auto& f : freq) {
-                f = (f + 1) / 2;
-            }
-            total = 0;
-            for (auto f : freq) {
-                total += f;
-            }
+    if (magic != 0x53525200) throw std::runtime_error("Invalid file format");
+    if (version != 1) throw std::runtime_error("Unsupported version");
+
+    // Decode file content
+    Predictor predictor;
+    BitDecoder decoder(in);
+    for (uint64_t j = 0; j < originalSize; ++j) {
+        int c = 0;
+        for (int i = 0; i < 8; ++i) {
+            int bit = decoder.decode(predictor.p());
+            predictor.update(bit);
+            c = (c << 1) | bit;
         }
-        update_cum_freq();
+        out.put(static_cast<char>(c));
     }
 }
