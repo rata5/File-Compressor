@@ -23,6 +23,56 @@ namespace {
         }
     };
 
+    class MatchPredictor {
+        static constexpr int HISTORY_SIZE = 8192;
+        std::vector<uint8_t> history;
+        int historyPos = 0;
+        uint8_t matchByte = 0;
+        bool matchFound = false;
+        int bitPos = 7;
+
+    public:
+        MatchPredictor() : history(HISTORY_SIZE, 0) {}
+
+        void findMatch(uint8_t prev3, uint8_t prev2, uint8_t prev1) {
+            matchFound = false;
+            for (int i = 3; i < HISTORY_SIZE - 4; ++i) {
+                int idx0 = (historyPos - i + HISTORY_SIZE) % HISTORY_SIZE;
+                int idx1 = (idx0 + 1) % HISTORY_SIZE;
+                int idx2 = (idx0 + 2) % HISTORY_SIZE;
+
+                if (history[idx0] == prev3 &&
+                    history[idx1] == prev2 &&
+                    history[idx2] == prev1) {
+
+                    int idx3 = (idx0 + 3) % HISTORY_SIZE;
+                    matchByte = history[idx3];
+                    matchFound = true;
+                    bitPos = 7;
+                    break;
+                }
+            }
+        }
+
+        int p() const {
+            if (!matchFound) return 32768; // neutral
+            return ((matchByte >> bitPos) & 1) ? 45000 : 20000; // softer prediction
+        }
+
+        void update(int bit) {
+            if (matchFound && bitPos > 0) --bitPos;
+        }
+
+        void addByte(uint8_t b) {
+            history[historyPos] = b;
+            historyPos = (historyPos + 1) % HISTORY_SIZE;
+        }
+
+        bool isMatch() const {
+            return matchFound;
+        }
+    };
+
     class BitEncoder {
         uint32_t x1 = 0;
         uint32_t x2 = 0xFFFFFFFF;
@@ -93,7 +143,6 @@ namespace {
 } // namespace
 
 bool paq_compress(const std::string& inPath, const std::string& outPath) {
-    if (file_exists(outPath)) return false;
 
     std::ifstream in(inPath, std::ios::binary);
     std::ofstream out(outPath, std::ios::binary);
@@ -108,11 +157,7 @@ bool paq_compress(const std::string& inPath, const std::string& outPath) {
     if (!hasBom) {
         in.seekg(0);
     }
-    else {
-        // Skip BOM — will be restored later
-    }
 
-    // Read full file
     char c;
     while (in.get(c)) {
         data.push_back(static_cast<uint8_t>(c));
@@ -127,15 +172,32 @@ bool paq_compress(const std::string& inPath, const std::string& outPath) {
     out.write(reinterpret_cast<const char*>(&size), sizeof(size));
     out.write(reinterpret_cast<const char*>(&bomFlag), sizeof(bomFlag));
 
-    // Compress
-    TextPredictor predictor;
+    // Compression with Text + Match Predictors
+    TextPredictor textPredictor;
+    MatchPredictor matchPredictor;
+
     BitEncoder encoder(out);
+    uint8_t prev1 = 0, prev2 = 0, prev3=0;
+
     for (uint8_t byte : data) {
+        matchPredictor.findMatch(prev1, prev2, prev3);
+
         for (int i = 7; i >= 0; --i) {
             int bit = (byte >> i) & 1;
-            encoder.encode(bit, predictor.p());
-            predictor.update(bit);
+
+            int p1 = textPredictor.p();
+            int p2 = matchPredictor.p();
+            int mixed = matchPredictor.isMatch() ? (p1 + p2) / 2 : p1;
+
+            encoder.encode(bit, mixed);
+            textPredictor.update(bit);
+            matchPredictor.update(bit);
         }
+
+        matchPredictor.addByte(byte);
+        prev3 = prev2;
+        prev2 = prev1;
+        prev1 = byte;
     }
 
     encoder.flush();
@@ -143,7 +205,6 @@ bool paq_compress(const std::string& inPath, const std::string& outPath) {
 }
 
 bool paq_decompress(const std::string& inPath, const std::string& outPath) {
-    if (file_exists(outPath)) return false;
 
     std::ifstream in(inPath, std::ios::binary);
     std::ofstream out(outPath, std::ios::binary);
@@ -162,21 +223,44 @@ bool paq_decompress(const std::string& inPath, const std::string& outPath) {
         throw std::runtime_error("Invalid file format.");
     }
 
-    // Write BOM if needed
+    // Write UTF-8 BOM if present
     if (bomFlag == 1) {
         out.put(static_cast<char>(0xEF));
         out.put(static_cast<char>(0xBB));
         out.put(static_cast<char>(0xBF));
     }
 
-
-    TextPredictor predictor;
+    // Predictors
+    TextPredictor textPredictor;
+    MatchPredictor matchPredictor;
     BitDecoder decoder(in);
-    std::vector<uint8_t> outData;
 
-    // Write final output
-    for (uint8_t b : outData) {
-        out.put(static_cast<char>(b));
+    // Previous byte context
+    uint8_t prev1 = 0, prev2 = 0, prev3 = 0;
+
+    for (uint64_t i = 0; i < size; ++i) {
+        uint8_t byte = 0;
+
+        matchPredictor.findMatch(prev3, prev2, prev1);
+
+        for (int j = 7; j >= 0; --j) {
+            int p1 = textPredictor.p();
+            int p2 = matchPredictor.p();
+            int mixed = matchPredictor.isMatch() ? (p1 + p2) / 2 : p1;
+
+            int bit = decoder.decode(mixed);
+            textPredictor.update(bit);
+            matchPredictor.update(bit);
+            byte |= (bit << j);
+        }
+
+        out.put(static_cast<char>(byte));
+        matchPredictor.addByte(byte);
+
+        // Update context
+        prev3 = prev2;
+        prev2 = prev1;
+        prev1 = byte;
     }
 
     return true;
