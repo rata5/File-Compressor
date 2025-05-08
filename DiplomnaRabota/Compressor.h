@@ -5,8 +5,8 @@
 
 class Compressor {
 public:
-    static void compress(const std::string& in, const std::string& out);
-    static void decompress(const std::string& in, const std::string& out);
+    static void compress(const std::string& inPath, const std::string& outPath);
+    static void decompress(const std::string& inPath, const std::string& outPath);
 };
 
 #endif
