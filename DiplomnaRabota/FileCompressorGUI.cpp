@@ -27,7 +27,7 @@ void FileCompressorGUI::setupUI() {
     removeFileBtn = new QPushButton("Remove Selected", this);
     browseBtn = new QPushButton("Browse...", this);
 
-    startBtn = new QPushButton("Proceed", this);
+    startBtn = new QPushButton("Start Compression", this);
     startBtn->setFixedHeight(40);
 
     outputPathEdit = new QLineEdit(this);
@@ -104,18 +104,7 @@ void FileCompressorGUI::startCompression() {
         QString outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".srr");
 
         try {
-            QString outputFilePath;
-
-            if (inputInfo.suffix().toLower() == "srr") {
-                // Decompress
-                outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".txt"); // remove .srr
-                Compressor::decompress(inputFilePath.toStdString(), outputFilePath.toStdString());
-            }
-            else {
-                // Compress
-                outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".srr");
-                Compressor::compress(inputFilePath.toStdString(), outputFilePath.toStdString());
-            }
+            Compressor::compress(inputFilePath.toStdString(), outputFilePath.toStdString());
         }
         catch (const std::exception& e) {
             QMessageBox::critical(this, "Compression Error", QString("Failed to compress %1: %2")
