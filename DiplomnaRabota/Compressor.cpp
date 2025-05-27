@@ -128,7 +128,6 @@ public:
     virtual void updateByte(uint8_t b) = 0;    
 };
 
-
 class ByteContextModel : public IModel {
     size_t order;
     std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> table;
@@ -207,32 +206,34 @@ public:
 };
 
 class MatchModel : public IModel {
-    static constexpr size_t WINDOW_SIZE = 1 << 20;  
-    static constexpr size_t CONTEXT_SIZE = 4;       
-    std::vector<uint8_t> buffer;              
+    const size_t contextSize;
+    static constexpr size_t WINDOW_SIZE = 1 << 20;
+
+    std::vector<uint8_t> buffer;
     size_t bufPos = 0;
-    std::unordered_map<uint32_t, size_t> lastPos;    
+
+    std::unordered_map<uint64_t, size_t> lastPos;  
     size_t matchPos = std::string::npos;
     int matchLen = 0;
     int bitPos = 0;
 
 public:
-    MatchModel() : buffer(WINDOW_SIZE, 0) {}
+    MatchModel(size_t ctxSize = 4)
+        : contextSize(ctxSize), buffer(WINDOW_SIZE, 0) {
+    }
 
     uint16_t predict() const override {
         if (matchPos == std::string::npos || matchLen < 1)
-            return 32768;  // neutral if no match
+            return 32768;
 
-        // Determine next bit from the match buffer
         uint8_t nextByte = buffer[(matchPos + matchLen) % WINDOW_SIZE];
-        int     nextBit = (nextByte >> (7 - bitPos)) & 1;
+        int nextBit = (nextByte >> (7 - bitPos)) & 1;
 
-        // Scale confidence: small nudges for short matches, big for long
         int confidence;
-        if (matchLen == 1)        confidence = 256;    // ±256
-        else if (matchLen == 2)   confidence = 1024;   // ±1024
-        else if (matchLen == 3)   confidence = 4096;   // ±4096
-        else                       confidence = 8192;   // ±8192 for >=4
+        if (matchLen == 1)        confidence = 256;
+        else if (matchLen == 2)   confidence = 1024;
+        else if (matchLen == 3)   confidence = 4096;
+        else                      confidence = 8192;
 
         int p = nextBit
             ? 32768 + confidence
@@ -240,7 +241,6 @@ public:
 
         return static_cast<uint16_t>(std::clamp(p, 1, 65534));
     }
-
 
     void updateBit(int bit) override {
         if (++bitPos == 8) {
@@ -256,25 +256,32 @@ public:
 
     void updateByte(uint8_t b) override {
         buffer[bufPos] = b;
-        size_t base = bufPos >= CONTEXT_SIZE
-            ? bufPos - CONTEXT_SIZE
-            : WINDOW_SIZE + bufPos - CONTEXT_SIZE;
-        uint32_t key = (uint32_t(buffer[(base + 0) % WINDOW_SIZE]) << 16)
-            | (uint32_t(buffer[(base + 1) % WINDOW_SIZE]) << 8)
-            | uint32_t(buffer[(base + 2) % WINDOW_SIZE]);
 
-        auto it = lastPos.find(key);
-        if (it != lastPos.end()) {
-            matchPos = it->second;
-            matchLen = 1;
-            bitPos = 0;
+        if (contextSize <= bufPos || bufPos >= contextSize) {
+            size_t base = bufPos >= contextSize
+                ? bufPos - contextSize
+                : WINDOW_SIZE + bufPos - contextSize;
+
+            uint64_t key = 0;
+            for (size_t i = 0; i < contextSize; ++i) {
+                key = (key << 8) | buffer[(base + i) % WINDOW_SIZE];
+            }
+
+            auto it = lastPos.find(key);
+            if (it != lastPos.end()) {
+                matchPos = it->second;
+                matchLen = 1;
+                bitPos = 0;
+            }
+            else {
+                matchPos = std::string::npos;
+                matchLen = 0;
+                bitPos = 0;
+            }
+
+            lastPos[key] = bufPos;
         }
-        else {
-            matchPos = std::string::npos;
-            matchLen = 0;
-            bitPos = 0;
-        }
-        lastPos[key] = bufPos;
+
         bufPos = (bufPos + 1) % WINDOW_SIZE;
     }
 };
@@ -282,17 +289,17 @@ public:
 class SSE {
     std::vector<uint16_t> table;
 public:
-    SSE() : table(512, 32768) {}
+    SSE() : table(1024, 32768) {}
 
     uint16_t predict(uint16_t p) const {
-        return table[p >> 7];  // use top 9 bits as index
+        return table[p >> 6]; 
     }
 
     void update(uint16_t p, int bit) {
-        int idx = p >> 7;
+        int idx = p >> 6;
         uint16_t target = bit ? 65535 : 0;
         uint16_t& val = table[idx];
-        val += ((target - val) >> 5);  // learning rate 1/32
+        val += ((target - val) >> 4); 
     }
 };
 
@@ -307,23 +314,22 @@ public:
     }
 
     uint16_t mix() const {
-        double num = 0, den = 0;
+        double sum = 0.0;
         for (size_t i = 0; i < mods.size(); ++i) {
-            double p = mods[i]->predict() / 65535.0;
-            num += w[i] * p;
-            den += w[i];
+            double pi = std::clamp(mods[i]->predict() / 65535.0, 0.0001, 0.9999);
+            sum += w[i] * std::log(pi / (1.0 - pi)); 
         }
-        double p = (den > 0 ? num / den : 0.5);
-        return static_cast<uint16_t>(p * 0xFFFF);
+        double p = 1.0 / (1.0 + std::exp(-sum)); 
+        return static_cast<uint16_t>(p * 65535.0 + 0.5);
     }
 
     void update(uint16_t p1, int bit) {
-        double p = p1 / 65535.0;
-        double err = bit - p;
+        double p = std::clamp(p1 / 65535.0, 0.0001, 0.9999);
+        double error = bit - p;
         for (size_t i = 0; i < mods.size(); ++i) {
-            double m = mods[i]->predict() / 65535.0;
-            w[i] += lr * err * (m - p);
-            w[i] = std::clamp(w[i], 0.1, 10.0);  
+            double pi = std::clamp(mods[i]->predict() / 65535.0, 0.0001, 0.9999);
+            double grad = std::log(pi / (1.0 - pi));
+            w[i] += lr * error * grad;
         }
     }
 };
@@ -402,54 +408,40 @@ void Compressor::compress(const std::string& inPath, const std::string& outPath)
     if (!out) throw std::runtime_error("Cannot open output");
     uint64_t fullSize = input.size();
     out.write(reinterpret_cast<const char*>(&fullSize), sizeof(fullSize));
-    ByteContextModel bcm1(1), bcm2(2);
+    ByteContextModel bcm1(1), bcm2(2), bcm3(3), bcm4(4);
     BitContextModel  bitm(16);
-    MatchModel       match;
-    std::vector<IModel*> mods;
-    mods.reserve(4);
-    mods.push_back(&bcm1);
-    mods.push_back(&bcm2);
-    mods.push_back(&bitm);
-    mods.push_back(&match);
+    MatchModel       match4(4), match8(8);
+    std::vector<IModel*> mods = { &bcm1, &bcm2, &bcm3, &bcm4, &bitm, &match4, &match8 };
     Mixer mixer(mods, 0.005);
-    size_t offset = 0;
-    while (offset < input.size()) {
-        size_t len = std::min(BLOCK_SIZE, input.size() - offset);
-        std::string block = input.substr(offset, len);
-        auto bwt_pair = bwtTransform(block);
-        auto mtf = mtfEncode(bwt_pair.first);
-        auto rle = rleZero(mtf);
-        std::ostringstream tmp(std::ios::binary);
-        RangeCoder coder(tmp);
-        for (uint8_t byte : rle) {
-            for (int b = 7; b >= 0; --b) {
-                int bit = (byte >> b) & 1;
-                uint16_t p = mixer.mix();
-                coder.encode(bit, p);
-                mixer.update(p, bit);
-                bitm.updateBit(bit);
-                bcm1.updateBit(bit);
-                bcm2.updateBit(bit);
-                match.updateBit(bit);
-            }
-            bitm.updateByte(byte);
-            bcm1.updateByte(byte);
-            bcm2.updateByte(byte);
-            match.updateByte(byte);
+    //SSE   sse;
+    auto [bwtLast, primary] = bwtTransform(input);
+    auto mtf = mtfEncode(bwtLast);
+    auto rle = rleZero(mtf);
+    std::ostringstream tmp(std::ios::binary);
+    RangeCoder coder(tmp);
+    for (uint8_t byte : rle) {
+        for (int b = 7; b >= 0; --b) {
+            int bit = (byte >> b) & 1;
+            uint16_t p1 = mixer.mix();
+            //uint16_t p2 = sse.predict(p1);
+            coder.encode(bit, p1);
+            
+            mixer.update(p1, bit);
+            for (IModel* m : mods)                
+                m->updateBit(bit);
         }
-        coder.finish();
-        std::string compData = tmp.str();
-        uint32_t blockLen = uint32_t(len);
-        uint32_t primary = bwt_pair.second;
-        uint32_t rleCount = uint32_t(rle.size());
-        uint32_t compSize = uint32_t(compData.size());
-        out.write(reinterpret_cast<const char*>(&blockLen), sizeof(blockLen));
-        out.write(reinterpret_cast<const char*>(&primary), sizeof(primary));
-        out.write(reinterpret_cast<const char*>(&rleCount), sizeof(rleCount));
-        out.write(reinterpret_cast<const char*>(&compSize), sizeof(compSize));
-        out.write(compData.data(), compData.size());
-        offset += len;
+        for (auto* m : mods) m->updateByte(byte);
     }
+    coder.finish();
+    std::string compData = tmp.str();
+    uint32_t blockLen = uint32_t(input.size());
+    uint32_t rleCount = uint32_t(rle.size());
+    uint32_t compSize = uint32_t(compData.size());
+    out.write(reinterpret_cast<const char*>(&blockLen), sizeof(blockLen));
+    out.write(reinterpret_cast<const char*>(&primary), sizeof(primary));
+    out.write(reinterpret_cast<const char*>(&rleCount), sizeof(rleCount));
+    out.write(reinterpret_cast<const char*>(&compSize), sizeof(compSize));
+    out.write(compData.data(), compData.size());
 }
 
 void Compressor::decompress(const std::string& inPath, const std::string& outPath) {
@@ -460,22 +452,18 @@ void Compressor::decompress(const std::string& inPath, const std::string& outPat
     if (!in) throw std::runtime_error("Cannot open input");
     uint64_t fullSize;
     in.read(reinterpret_cast<char*>(&fullSize), sizeof(fullSize));
-    ByteContextModel bcm1(1), bcm2(2);
+    ByteContextModel bcm1(1), bcm2(2), bcm3(3), bcm4(4);
     BitContextModel  bitm(16);
-    MatchModel       match;
-    std::vector<IModel*> mods;
-    mods.reserve(4);
-    mods.push_back(&bcm1);
-    mods.push_back(&bcm2);
-    mods.push_back(&bitm);
-    mods.push_back(&match);
+    MatchModel       match4(4), match8(8);
+    //SSE              sse;                     
+    std::vector<IModel*> mods = { &bcm1, &bcm2, &bcm3, &bcm4, &bitm, &match4, &match8 };
     Mixer mixer(mods, 0.005);
     std::ofstream out(outPath, std::ios::binary);
     if (!out) throw std::runtime_error("Cannot open output");
     while (true) {
         uint32_t blockLen, primary, rleCount, compSize;
         if (!in.read(reinterpret_cast<char*>(&blockLen), sizeof(blockLen)))
-            break; 
+            break;
         in.read(reinterpret_cast<char*>(&primary), sizeof(primary));
         in.read(reinterpret_cast<char*>(&rleCount), sizeof(rleCount));
         in.read(reinterpret_cast<char*>(&compSize), sizeof(compSize));
@@ -488,20 +476,18 @@ void Compressor::decompress(const std::string& inPath, const std::string& outPat
         for (uint32_t i = 0; i < rleCount; ++i) {
             uint8_t c = 0;
             for (int b = 7; b >= 0; --b) {
-                uint16_t p = mixer.mix();
-                int bit = dec.decode(p);
-                mixer.update(p, bit);
-                bitm.updateBit(bit);
-                bcm1.updateBit(bit);
-                bcm2.updateBit(bit);
-                match.updateBit(bit);
-                c |= (bit << b);
+                uint16_t p1 = mixer.mix();           
+                //uint16_t p2 = sse.predict(p1);      
+                int bit = dec.decode(p1);           
+                                 
+                mixer.update(p1, bit);                
+                for (IModel* model : mods)
+                    model->updateBit(bit);            
+                c |= (uint8_t(bit) << b);
             }
             rle.push_back(c);
-            bitm.updateByte(c);
-            bcm1.updateByte(c);
-            bcm2.updateByte(c);
-            match.updateByte(c);
+            for (IModel* model : mods)
+                model->updateByte(c);
         }
         auto mtf = rleZeroDecode(rle);
         auto bwt = mtfDecode(mtf);
