@@ -27,7 +27,7 @@ void FileCompressorGUI::setupUI() {
     removeFileBtn = new QPushButton("Remove Selected", this);
     browseBtn = new QPushButton("Browse...", this);
 
-    startBtn = new QPushButton("Proceed", this);
+    startBtn = new QPushButton("Compress / Decompress", this);
     startBtn->setFixedHeight(40);
 
     outputPathEdit = new QLineEdit(this);
@@ -55,7 +55,7 @@ void FileCompressorGUI::setupUI() {
 
     central->setLayout(mainLayout);
 
-    setWindowTitle("File Compressor");
+    setWindowTitle("ZeroBit");
     resize(600, 400);
 
     connect(addFileBtn, &QPushButton::clicked, this, &FileCompressorGUI::addFiles);
@@ -97,33 +97,40 @@ void FileCompressorGUI::startCompression() {
     progressBar->setValue(0);
     int fileCount = dragAndDropList->count();
 
+    QStringList allowedTextExtensions = { "txt", "csv", "log", "xml", "html", "json", "md", "ini", "yaml", "yml" };
+
     for (int i = 0; i < fileCount; ++i) {
         QListWidgetItem* item = dragAndDropList->item(i);
         QString inputFilePath = item->text();
         QFileInfo inputInfo(inputFilePath);
-        QString outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".srr");
 
         try {
             QString outputFilePath;
 
             if (inputInfo.suffix().toLower() == "srr") {
-                // Decompress
-                outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".txt"); // remove .srr
+                QString originalName = inputInfo.fileName();
+                originalName.chop(4);  
+                outputFilePath = dir.filePath(originalName);
                 Compressor::decompress(inputFilePath.toStdString(), outputFilePath.toStdString());
             }
             else {
-                // Compress
-                outputFilePath = dir.filePath(inputInfo.completeBaseName() + ".srr");
+                QString ext = inputInfo.suffix().toLower();
+                if (!allowedTextExtensions.contains(ext)) {
+                    QMessageBox::warning(this, "Unsupported File", QString("Skipping unsupported file: %1").arg(inputFilePath));
+                    continue;
+                }
+
+                outputFilePath = dir.filePath(inputInfo.fileName() + ".srr");  
                 Compressor::compress(inputFilePath.toStdString(), outputFilePath.toStdString());
             }
         }
         catch (const std::exception& e) {
-            QMessageBox::critical(this, "Compression Error", QString("Failed to compress %1: %2")
+            QMessageBox::critical(this, "Compression Error", QString("Failed to process %1: %2")
                 .arg(inputFilePath, e.what()));
-            statusLabel->setText("Status Failed!");
+            statusLabel->setText("Status: Failed!");
             return;
         }
+
         progressBar->setValue((i + 1) * 100 / fileCount);
     }
-    statusLabel->setText("Status: Done!");
 }
